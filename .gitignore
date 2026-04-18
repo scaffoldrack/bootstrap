@@ -1,0 +1,100 @@
+# scaffoldrack/bootstrap — .gitignore
+#
+# Scripts and runbooks for bringing up the platform from scratch.
+
+# ─────────────────────────────────────────────────────────
+# Shell scripts — temp output is common
+# ─────────────────────────────────────────────────────────
+
+# Output from scripts run locally
+output/
+*.output
+*.result
+
+# ─────────────────────────────────────────────────────────
+# Python (if any scripts are in Python)
+# ─────────────────────────────────────────────────────────
+
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+
+# ─────────────────────────────────────────────────────────
+# Workspace
+# ─────────────────────────────────────────────────────────
+tmp/*
+!tmp/.gitkeep
+
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# ─────────────────────────────────────────────────────────
+# Secrets and environment
+# ─────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+*.crt
+*.cer
+id_rsa
+id_ed25519
+credentials
+credentials.json
+
+# Bootstrap often generates initial credentials that shouldn't be committed
+initial-root-token
+vault-init.json
+unseal-keys.txt
+bootstrap-token
+
+# ─────────────────────────────────────────────────────────
+# OS junk
+# ─────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.directory
+.Trash-*
+
+# ─────────────────────────────────────────────────────────
+# Editors and IDEs
+# ─────────────────────────────────────────────────────────
+.vscode/
+*.code-workspace
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+Session.vim
+
+# ─────────────────────────────────────────────────────────
+# Backups and temp files
+# ─────────────────────────────────────────────────────────
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+
+# Logs
+logs/
+*.log
