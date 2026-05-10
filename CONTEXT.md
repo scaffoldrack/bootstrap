@@ -1,22 +1,82 @@
 # CONTEXT.md — bootstrap
 
-**Repo purpose:** Bootstrap scripts and Ansible automation for managing The Scaffold Rack platform.
+**Repo purpose:** Ansible automation that takes raw scaffoldrack hosts (commander, ai, pve1, pve2) from "fresh OS install with andrew having sudo" to "fully bootstrapped, hardened, and ready for the platform layers above." Plus the one shell script that bootstraps the control node itself.
 
-**Last updated:** 2026-05-09
+**Last updated:** 2026-05-10
 
 ---
 
 ## 1. What this repo is
 
-This repo holds two things:
+This repo is the **foundation layer** of The Scaffold Rack platform. It owns:
 
-1. **One shell script** (`scripts/bootstrap-control-node.sh`) that seeds a fresh Debian box into being an Ansible control node. Narrowly scoped: installs Docker, builds/pulls the `devops-toolkit:latest` container image. Nothing else.
+- **The control-node bootstrap shell script** — `scripts/bootstrap-control-node.sh`. Installs Docker and builds/pulls the `devops-toolkit:latest` container image. Nothing else.
+- **The Ansible runtime** — inventory, roles, playbooks for configuring all scaffoldrack hosts.
+- **The two-identity model implementation** — `andrew` (manual foothold) → `bob` (automation identity) per the playbook in `playbooks/bootstrap.yml`.
+- **The control-node configuration** — `roles/control_node/` deploys zsh, oh-my-zsh, and the toolkit aliases that wrap the devops-toolkit container.
+- **The dev-environment configuration** (anticipated; per the tooling-vs-declarative-state distinction) — `roles/dev_environment/` will eventually handle umask, CLAUDE.md symlinks, and other declarative per-developer-machine state.
+- **Host hardening** — `roles/hardening/` (one role, task-file splits, tags). SSH, UFW, sysctl, fail2ban, etc.
+- **Eventually, Proxmox conversion** — `roles/proxmox/` for Debian-to-Proxmox conversion on pve1 and pve2.
 
-2. **All Ansible content** — inventory, roles, playbooks — that manages every host in the platform from that point forward. This includes configuring the control node itself (zsh, toolkit aliases, completions) via the `control_node` role.
+This repo's job ends at "host is configured, hardened, and ready." Application deployment, Kubernetes provisioning, GitOps, and observability live in other scaffoldrack repos.
 
-The shell script is the only thing that exists outside Ansible because there's no way to use Ansible to set up the thing that runs Ansible. Once the script finishes and the container image is available, Ansible takes over for everything else — including configuring its own runtime environment on the control node.
+## 2. Repo conventions
 
-## 2. Hosts in scope
+These match the broader Scaffold Rack project conventions. **Most working
+agreements live higher up in the three-scope CLAUDE.md model:**
+
+- **Scope 1 (universal):** `~/CLAUDE.md` — symlinked from
+  `kb/CLAUDE.md`. Communication register, file/document conventions,
+  the 3am rule, deliver-complete-files-or-deterministic-commands.
+- **Scope 2 (scaffoldrack-org-wide):** `~/Projects/scaffoldrack/CLAUDE.md`
+  — symlinked from `kb/projects/scaffoldrack/CLAUDE.md`. Runtime model
+  (devops-toolkit container), two-identity model (andrew → bob), host
+  inventory, Gitea/GitHub push pattern, `~/.blackwell` token convention,
+  per-repo `.githooks/` with `core.hooksPath`.
+- **Scope 3 (this repo):** `CLAUDE.md` in the repo root.
+
+See `kb/meta/2026-05-09-claude-md-three-scopes.md` for the full model.
+
+Conventions specific to this repo (don't restate Scope 1 or Scope 2):
+
+- **Idempotency is the bright-line requirement.** Re-runs detect existing state and skip with a `warn` log; never destructive, never failing on second-or-later invocation.
+- **`bootstrap-control-node.sh` is allowed to do exactly two things:** install Docker, build/pull the toolkit container. Anything else belongs in an Ansible role.
+- **Hardening as one role with task-file splits and tags.** `--tags ssh` allows targeted re-runs.
+- **Validation order:** commander → ai → pve2 → pve1 → parity.
+
+## 3. Directory structure
+
+```
+bootstrap/
+├── README.md              # human-facing entry point
+├── CONTEXT.md             # this file — read on every session
+├── CLAUDE.md              # Scope 3 working agreements for this repo
+├── LICENSE                # Apache 2.0
+├── .gitignore
+├── .githooks/             # per-repo git hooks (set core.hooksPath = .githooks)
+│   └── pre-commit         # normalizes permissions on staged files
+├── decisions/             # Scope 3 ADRs for repo-specific decisions
+│   ├── 001-automation-user-bob.md
+│   ├── 002-toolkit-container-as-runtime.md
+│   ├── 003-bootstrap-control-node-scope.md
+│   └── 004-validation-order.md
+├── inventory/             # Ansible inventory (placeholder)
+│   └── .gitkeep
+├── roles/                 # Ansible roles (placeholder)
+│   └── .gitkeep
+├── playbooks/             # Ansible playbooks (placeholder)
+│   └── .gitkeep
+├── scripts/               # Shell scripts (placeholder; bootstrap-control-node.sh lands here)
+│   └── .gitkeep
+└── tmp/
+    └── .gitkeep
+```
+
+The directories are placeholders today — they materialize content as work progresses. The structure is in place so the repo's shape is clear from the start.
+
+## 4. Hosts in scope
+
+The four scaffoldrack hosts this repo manages:
 
 | Host | Address | OS | Role |
 |---|---|---|---|
@@ -25,294 +85,164 @@ The shell script is the only thing that exists outside Ansible because there's n
 | pve1 | 172.31.200.11 | Debian 13 (Trixie) → Proxmox | Hypervisor |
 | pve2 | 172.31.200.12 | Debian 13 (Trixie) → Proxmox | Hypervisor |
 
-commander is both control node *and* a managed host. It's managed via `ansible_connection: local` to sidestep the 2FA-on-external-SSH consideration entirely.
-
-## 3. Architectural decisions (summary)
-
-Full reasoning in `decisions/`. Brief summary here:
-
-- **Automation user is `bob`, UID 990, ed25519 key, NOPASSWD: ALL sudo.** ADR-001. The NOPASSWD: ALL trade-off is documented as "wrong choice for FedRAMP, revisit when compliance work starts." UID 990 is high enough that no Debian package install will collide with it.
-
-- **One shell script lives outside Ansible.** ADR-002. `bootstrap-control-node.sh` is narrowly scoped to Docker + container image. Everything else (including control node configuration) is a playbook.
-
-- **Unified repo, not split.** ADR-003. We considered separating bootstrap-the-shell-script from a dedicated ansible repo, and rejected it. One workflow, one repo, one place to look.
+commander is both control node and managed host (`ansible_connection: local`). The detailed inventory will land in `inventory/hosts.yml` when the inventory work begins.
 
-- **Hardening is one role with internal task splits and tags.** ADR-004. UFW for firewall. Tags on each task file mean `--tags ssh` works for targeted re-runs.
+The host inventory is also restated at the org level in Scope 2 CLAUDE.md (`kb/projects/scaffoldrack/CLAUDE.md` §3). Where they overlap, this file is the operational truth for bootstrap-specific work; Scope 2 is the umbrella view.
 
-- **Gitea push-primary, GitHub push-mirror** (cross-cutting decision). Push to Gitea on commander; Gitea push-mirrors to GitHub publicly.
+## 5. The two identities
 
-- **2FA applies to human SSH on commander only.** bob is for outbound automation from commander to managed hosts. commander manages itself via `ansible_connection: local`. No conflict between 2FA and Ansible.
-
-## 4. The two-identity model — andrew and bob
+Per ADR-001 (`decisions/001-automation-user-bob.md`) and Scope 2 CLAUDE.md §2:
 
-Every managed host has two identities at different stages of its lifecycle:
+- **andrew** — human-provisioned foothold. Created during OS install with sudo (password required, NOT NOPASSWD). Used exactly once per host: to run `bootstrap.yml` and create bob. Andrew passwords differ per host (security hygiene); this only matters at bootstrap time.
+- **bob** — automation identity. Created by `bootstrap.yml` running as andrew. UID 990, ed25519 key authentication, NOPASSWD: ALL sudo. Every Ansible playbook from `site.yml` onward runs as bob. Andrew is dormant after bootstrap.
 
-- **andrew** — the human-provisioned foothold. Created during OS install with sudo (password required, not NOPASSWD). Used exactly once per host: to run `bootstrap.yml` and create bob. Never used for automation thereafter. Andrew passwords differ per host (security hygiene); this only matters at bootstrap time.
+The model means there's one irreducibly manual prerequisite per host: andrew must exist with sudo before Ansible can do anything. Everything past that is automated.
 
-- **bob** — the automation identity. Created by `bootstrap.yml` running as andrew. UID 990, ed25519 key auth, NOPASSWD sudo. Every Ansible playbook from `site.yml` onward runs as bob. Andrew is dormant after bootstrap.
+## 6. The runtime
 
-This model means there is one irreducibly manual prerequisite per host: andrew must exist with sudo before Ansible can do anything. That's the foothold. Everything past that is automated.
+Per ADR-002 (`decisions/002-toolkit-container-as-runtime.md`) and Scope 2 CLAUDE.md §1:
 
-## 5. Repo conventions
+All `ansible*`, `kubectl`, `helm`, `vault`, etc. commands run inside the
+`devops-toolkit:latest` container, invoked via zsh aliases set up by
+`roles/control_node/`. The container is the runtime; the aliases are the
+user interface.
 
-These match the broader Scaffold Rack project conventions. Code-Claude follows them without exception:
+The one-time bootstrap-the-bootstrap step: after `bootstrap-control-node.sh`
+finishes, the user manually runs
+`docker run ... ansible-playbook playbooks/control-node.yml --ask-become-pass`
+once. That playbook configures the shell, drops the aliases, sets up
+oh-my-zsh, generates completions. Subsequent ansible runs use the alias.
 
-- **Markdown only** for documentation. Never `.docx`, `.pdf`, or other formats.
-- **INSTRUCTIONS.md** (not README.md) for AI-generated rollout/placement docs. README.md is for human readers.
-- **No heredocs in scripts.** Use configuration files.
-- **Idempotent.** Every script and playbook safe to re-run. Re-running detects existing state and skips with a warning rather than failing or doing destructive work.
-- **`tmp/` directory** with `.gitkeep` (`tmp/*` + `!tmp/.gitkeep` in `.gitignore`). Never commit work products from `tmp/` directly — move them to their proper location first.
-- **`.example` suffix** for templated files; real values gitignored.
-- **Color-coded logging helpers** (`log`/`warn`/`die`) in shell scripts.
-- **Secrets never committed.** ed25519 *public* key is fine to commit; private key never.
-- **Tokens come from `~/.blackwell`** on the control node, sourced at script runtime.
-- **ADRs in `decisions/`** with sections for: Status, Date, Context, Decision, Consequences, Alternatives Considered, Trade-offs Accepted, When This Is the Wrong Choice.
-- **3am rule.** Favor simplicity, compartmentalization, explicit-over-clever. Complexity must justify itself against "could I debug this at 3am, exhausted?"
-- **CONTEXT.md is authoritative.** Memory is a backup, not a source of truth.
-- **Always read files before editing.** Never reconstruct file contents from memory or assumption.
+Do not install Ansible, kubectl, helm, vault, etc. directly on hosts. The
+container IS the runtime.
 
-## 6. Directory structure
+## 7. The phase plan
 
-```
-bootstrap/
-├── README.md                 # human-facing entry point
-├── CONTEXT.md                # this file — Code-Claude reads on every session
-├── INSTRUCTIONS.md           # what Code-Claude should do/avoid
-├── ansible.cfg               # Ansible configuration
-├── .gitignore
-├── decisions/                # repo-specific ADRs
-│   ├── 001-automation-user-bob.md
-│   ├── 002-control-node-shell-script.md
-│   ├── 003-unified-bootstrap-and-ansible-repo.md
-│   └── 004-hardening-single-role-with-tags.md
-├── scripts/
-│   └── bootstrap-control-node.sh    # the only shell script
-├── inventory/
-│   ├── hosts.yml
-│   └── group_vars/
-│       ├── all.yml
-│       ├── proxmox.yml
-│       └── debian.yml
-├── files/
-│   └── bob.pub               # bob's ed25519 public key (committed)
-├── roles/
-│   ├── control_node/         # zsh, oh-my-zsh, toolkit aliases, completions
-│   ├── bootstrap_bob/        # idempotent: creates bob, key, sudoers
-│   ├── baseline/             # hostname, NTP, packages, sources
-│   ├── hardening/            # SSH, UFW, fail2ban, sysctl, audit, PAM, banner
-│   └── proxmox/              # Debian-to-Proxmox conversion (later)
-├── playbooks/
-│   ├── ping.yml              # smoke test
-│   ├── control-node.yml      # configures control node (zsh, aliases, etc.)
-│   ├── bootstrap.yml         # onboard a managed host (run once per host as andrew)
-│   ├── site.yml              # everything, idempotent, daily driver (runs as bob)
-│   ├── baseline.yml          # baseline only
-│   ├── harden.yml            # hardening only
-│   └── proxmox.yml           # Proxmox conversion (later)
-└── tmp/
-    └── .gitkeep
-```
+Bootstrap progresses through these phases. Each phase validates against the previous before moving on.
 
-## 7. Workflow
+### Phase 0 — Prerequisites
 
-### First-time control node setup
+- commander has Debian 12 + andrew with sudo
+- ai, pve1, pve2 have their respective OSes + andrew with SSH key auth
+- Andrew can `ssh ai/pve1/pve2 'hostname'` from commander without password
 
-This is a five-step sequence on a fresh Debian box. Three manual steps, two automated.
+**Status:** Done.
 
-**Manual prerequisites:**
+### Phase 1 — Control node
 
-The box must already have:
+- Run `bootstrap-control-node.sh` on commander. Result: Docker installed, `devops-toolkit:latest` image present.
+- Run `playbooks/control-node.yml` once via raw `docker run` (the bootstrap-the-bootstrap step). Result: zsh, oh-my-zsh, toolkit aliases configured on commander.
+- Validate: `type ansible-playbook` on commander shows the toolkit alias. `ansible localhost -m ping` works through the alias.
 
-- Debian 12+ installed
-- User with sudo privileges (the foothold for everything)
-- Internet access (to install packages and pull images)
+**Status:** Not started. This is the next concrete unit of code work.
 
-**Step 1 — Install git** (manual, one-time):
+### Phase 2 — Bootstrap one managed host (ai)
 
-```bash
-sudo apt update
-sudo apt install -y git
-```
+- Generate bob's ed25519 keypair on commander.
+- Write inventory entry for ai.
+- Run `playbooks/bootstrap.yml` against ai with `--ask-become-pass`. Result: bob exists on ai with SSH key auth and NOPASSWD: ALL sudo. SSH password auth disabled (after verification that bob can sudo).
+- Validate: `ansible ai -m ping` works as bob without prompting.
 
-**Step 2 — Clone the bootstrap repo** (manual, one-time):
+**Status:** Not started. ai is the low-stakes validation target.
 
-Ansible can't clone the repo containing Ansible. This step is irreducible.
+### Phase 3 — Bootstrap pve2
 
-```bash
-git clone https://gitea.mercnet.info/scaffoldrack/bootstrap.git
-cd bootstrap
-```
+- Same pattern as Phase 2, against pve2.
+- Validates that the bootstrap.yml works on Debian 13 Trixie (pve2 is Trixie; ai may be a different version).
 
-**Step 3 — Run bootstrap-control-node.sh** (automated, idempotent):
+**Status:** Not started.
 
-```bash
-./scripts/bootstrap-control-node.sh
-```
+### Phase 4 — Bootstrap pve1
 
-This installs Docker and builds/pulls the `devops-toolkit:latest` image. Re-running is safe: detects existing Docker installation and existing image, skips with warnings. Script is idempotent.
+- Same pattern as Phase 3, against pve1. By this point bootstrap.yml is well-validated.
 
-**Step 4 — Run the control-node playbook in the container** (one-time, awkward but unavoidable):
+**Status:** Not started.
 
-This is the bootstrap-the-bootstrap step. Ansible isn't installed on the host directly — it lives in the container — and the toolkit aliases haven't been configured yet. So this first invocation uses the raw `docker run` command:
+### Phase 5 — Hardening
 
-```bash
-docker run --rm -it \
-  -v $(pwd):/workspace \
-  -v ~/.ssh:/root/.ssh:ro \
-  -w /workspace \
-  --network host \
-  devops-toolkit:latest \
-  ansible-playbook playbooks/control-node.yml --ask-become-pass
-```
+- `roles/hardening/` applied via `site.yml` to all four hosts.
+- Tags: ssh, ufw, sysctl, fail2ban (initial set; expandable).
+- Validation order matches the bootstrap order.
 
-The playbook installs zsh, sets it as default shell, drops the toolkit aliases file, configures `.zshrc` to source it, installs oh-my-zsh, generates completions for kubectl and helm.
+**Status:** Not started.
 
-**Step 5 — Open a new zsh shell:**
+### Phase 6 — Proxmox conversion
 
-```bash
-exec zsh
-```
+- `roles/proxmox/` for Debian-to-Proxmox conversion. Applied to pve2 first, then pve1.
+- This is the original goal that motivated the whole bootstrap project.
 
-From this point forward, the toolkit aliases are active. `ansible-playbook playbooks/site.yml` works because `ansible-playbook` is now an alias that invokes the container with the right mounts.
+**Status:** Not started.
 
-### Prerequisites for a new managed host
+### Phase 7 — `dev_environment` role
 
-Before `bootstrap.yml` can run against a host, the host needs:
+- Per the tooling-vs-declarative-state distinction (`kb/meta/2026-05-10-tooling-vs-declarative-state.md`), per-developer-machine declarative state belongs here.
+- Tasks: umask 0027 in shell rc, CLAUDE.md symlinks (Scope 1 and Scope 2 per `kb/projects/scaffoldrack/00-DO-THIS-FIRST-symlink-setup.md`), eventually the git template trampoline if that pattern returns.
+- Applied to commander and other scaffoldrack-developer machines (work machine, etc.).
 
-- OS installed (Debian 12+)
-- User `andrew` created during OS install, with sudo privileges (password-required is fine)
-- SSH key from commander authorized for `andrew@host` (so passwordless SSH login works)
-- Static IP configured per the network plan
-- Hostname set per inventory naming
-- DNS resolution working
-- andrew's password recorded in a password manager (different per host)
+**Status:** Not started. Captured here so the role's scope is anticipated.
 
-These are irreducibly manual. Document them in INSTRUCTIONS.md before adding a new host to inventory.
+## 8. Current state
 
-### First-time managed host onboarding
+**Phase 0 done.** Phase 1 is the immediate next work.
 
-Run once per new target host. Andrew passwords differ per host, so each host runs separately:
-
-```bash
-ansible-playbook playbooks/bootstrap.yml --limit ai --ask-become-pass
-ansible-playbook playbooks/bootstrap.yml --limit pve1 --ask-become-pass
-ansible-playbook playbooks/bootstrap.yml --limit pve2 --ask-become-pass
-```
-
-Each invocation prompts for andrew's password on that specific host. The playbook:
-
-1. Creates bob (UID 990)
-2. Installs the public key
-3. Configures sudoers for NOPASSWD
-4. Verifies bob can SSH and sudo
-5. Disables SSH password authentication
-
-The verification step (bob can SSH and sudo) MUST succeed before SSH password auth is disabled. If verification fails, the playbook aborts before lockout.
-
-After successful bootstrap, that host is managed by Ansible as bob via key auth. Andrew is dormant; her password is no longer needed for routine operations.
-
-### Daily operations
-
-```bash
-ansible-playbook playbooks/site.yml                # everything
-ansible-playbook playbooks/site.yml --limit pve1   # one host
-ansible-playbook playbooks/harden.yml --tags ssh   # targeted task run
-```
-
-Always runs as bob with key auth. Idempotent — re-running enforces desired state.
-
-### Adding a new host
-
-1. Provision OS per prerequisites above
-2. Add to `inventory/hosts.yml` in the appropriate group
-3. Run `playbooks/bootstrap.yml --limit <host> --ask-become-pass` (one-time)
-4. Run `playbooks/site.yml --limit <host>` to bring it to baseline
-5. Run `playbooks/site.yml` going forward (recurring)
-
-## 8. Ansible runtime — the devops-toolkit container
-
-All `ansible*` (and `kubectl`, `helm`, `vault`, etc.) commands run inside the `devops-toolkit` container, not on the host directly. This pins tool versions across machines and follows the existing pattern from the work PoC.
-
-The toolkit is consumed via **zsh aliases**, not standalone shell scripts. The aliases are set up by the `control_node` role and live in a sourced file (e.g., `~/.zshrc.d/scaffoldrack-toolkit.zsh`). They invoke `docker run` with appropriate mounts and environment for each tool. Example pattern:
-
-```bash
-alias ansible="docker run --rm -it \
-  -v $(pwd):/workspace \
-  -v ~/.ssh:/home/runner/.ssh:ro \
-  -w /workspace \
-  --network host \
-  devops-toolkit:latest \
-  ansible"
-```
-
-The control_node role also sets up tab completion (via `compdef` and generated completion files) and helper functions beyond simple aliases.
-
-The container has SSH access to managed hosts because `~/.ssh` is bind-mounted read-only. bob's private key lives there as `~/.ssh/bob_ed25519`.
-
-The toolkit aliases file is committed to the repo at `roles/control_node/files/scaffoldrack-toolkit.zsh` so it's version-controlled and idempotent — re-running the control_node role updates the file in place if it has changed.
-
-## 9. Inventory model
-
-Two relevant groups:
-
-- **`debian`** — every host (commander, ai, pve1, pve2). Receives baseline + hardening.
-- **`proxmox`** — pve1, pve2 only. Additionally receives the Proxmox conversion role.
-
-commander has `ansible_connection: local`. Other hosts use `ansible_user: bob` and key auth (post-bootstrap) or `ansible_user: andrew` (during bootstrap, with `--ask-become-pass`).
-
-Host-specific overrides go in `host_vars/<hostname>.yml` if needed; group-level config in `group_vars/`.
-
-## 10. Validation order
-
-Each step gets validated against a low-stakes target before being applied to production-leaning hosts. The order:
-
-1. **commander** for control-node-specific things (`bootstrap-control-node.sh` and `control-node.yml` run here)
-2. **ai** for managed-host validation — it's a real host but not a hypervisor, so mistakes are recoverable
-3. **pve2** before pve1 — both are hypervisors, but pve2 is the "second" one and gets things first; pve1 follows once pve2 is proven
-4. Eventually parity: same configuration applied to all four hosts via `site.yml`
-
-## 11. Secrets handling
-
-- bob's private key: lives at `~/.ssh/bob_ed25519` on the control node. Never committed.
-- bob's public key: `files/bob.pub`. Committed.
-- bob's sudo password: not used (NOPASSWD).
-- andrew's sudo password: typed at bootstrap time via `--ask-become-pass`. Never stored in the repo, never typed twice (one bootstrap per host lifetime).
-- ansible-vault: not currently in use. Future addition when there are secrets needing repo-resident encryption (TLS keys, API tokens). Vault password handling will be designed at that time.
-
-## 12. Current state
-
-**Phase 0 — Bootstrap.** Repo is being initialized. The Ansible work proceeds in this order:
-
-1. Repo skeleton (CONTEXT, INSTRUCTIONS, ADRs, .gitignore, ansible.cfg)
-2. `scripts/bootstrap-control-node.sh` — Docker + devops-toolkit image only
-3. `roles/control_node/` — zsh, oh-my-zsh, toolkit aliases, completions
-4. `playbooks/control-node.yml` — applies control_node role to localhost
-5. `inventory/hosts.yml` and `group_vars/` — define the four hosts
-6. `playbooks/ping.yml` — smoke test, proves connectivity
-7. `roles/bootstrap_bob/` — declarative version of the bootstrap user creation
-8. `playbooks/bootstrap.yml` — onboard a managed host using bootstrap_bob role
-9. `roles/baseline/` — hostname, NTP, packages, sources
-10. `roles/hardening/` — SSH, UFW, fail2ban, sysctl, audit, PAM, banner
-11. `playbooks/site.yml` — composes the above
-12. `roles/proxmox/` — Debian-to-Proxmox conversion (later phase)
-
-## 13. What's NOT in scope here
-
-- **Kubernetes provisioning.** That's the Talos work in the `proxmox` repo.
-- **GitOps app deployment.** That's ArgoCD, lives in `platform-services` (eventually).
-- **Network configuration.** UDM Pro and VLAN setup is in `network`.
-- **Application deployment.** Mailu, Vaultwarden, Wyatt's site, Z's site — those land via ArgoCD on the eventual cluster.
-- **Backup orchestration.** Velero is in scope for `platform-services` later.
-- **Observability stack.** Grafana/Loki/Tempo/Mimir is in scope for `observability`.
-- **Personal dotfiles.** Personal preferences beyond what the `control_node` role provides (custom prompts, non-toolkit aliases, vim/nvim config, etc.) belong in a separate private dotfiles repo, not here.
-
-This repo's job ends at "host is configured, hardened, and ready for whatever comes next."
-
-## 14. Cross-references
-
-- **Platform meta-repo:** `gitea.mercnet.info/scaffoldrack/platform` — overall project map.
-- **Cross-cutting decisions:** `notes/decisions/` (private).
-- **Tools and templates:** `gitea.mercnet.info/scaffoldrack/tools` — repo scaffolding, conventions, helper scripts.
-- **Blog narrative:** `thescaffoldrack.com`.
-- **Internal Gitea:** `gitea.mercnet.info/scaffoldrack/bootstrap` — push-primary, GitHub mirror.
-- **docker-devops upstream:** `github.com/andrewjkrull/docker-devops` — source of the toolkit container image.
+Specifically, what exists today:
+
+- This `CONTEXT.md`
+- `CLAUDE.md` (Scope 3, composes with Scopes 1 and 2)
+- `README.md`
+- Empty placeholder directories: `inventory/`, `roles/`, `playbooks/`, `scripts/`
+- Four ADRs in `decisions/` capturing the foundational decisions
+- `.githooks/pre-commit` from the canonical source in tools repo
+
+What's NOT here yet:
+
+- `scripts/bootstrap-control-node.sh` — to be written next session
+- `inventory/hosts.yml` — to be written when bootstrap.yml is being written
+- `roles/control_node/` — to be written after `bootstrap-control-node.sh` is validated
+- `roles/bootstrap_bob/` — to be written when bob's keypair is generated and bootstrap.yml is being written
+- `roles/baseline/`, `roles/hardening/`, `roles/proxmox/` — later phases
+- `playbooks/control-node.yml`, `playbooks/bootstrap.yml`, `playbooks/site.yml`, `playbooks/ping.yml` — to be written as the corresponding roles materialize
+- `files/bob.pub` — to be created when bob's keypair is generated
+
+## 9. Backlog (bootstrap-specific items)
+
+Items captured here so they don't get lost. Most belong in future ADRs or work cycles.
+
+- Generate bob's ed25519 keypair on commander (immediate; `ssh-keygen -t ed25519 -f ~/.ssh/bob_ed25519 -C "bob@scaffoldrack" -N ""`)
+- Verify docker-devops state on commander (cloned? built? at what path?)
+- Write `bootstrap-control-node.sh` and validate on commander
+- Build `roles/control_node/` (zsh, oh-my-zsh, toolkit aliases adapted from PoC version)
+- Write `playbooks/control-node.yml`
+- Build inventory and `playbooks/ping.yml` for the smoke test
+- Write `roles/bootstrap_bob/` and `playbooks/bootstrap.yml`
+- Apply bootstrap to ai (Phase 2 validation), then pve2 (Phase 3), then pve1 (Phase 4)
+- Build `roles/baseline/` and `roles/hardening/` (Phase 5)
+- Build `roles/proxmox/` for Debian-to-Proxmox conversion (Phase 6)
+- Build `roles/dev_environment/` for declarative per-machine state (Phase 7)
+- Get pve1 and pve2 actually running Proxmox (the original goal that motivated this repo)
+- End-to-end validation of `bootstrap-control-node.sh` on a fresh throwaway VM
+
+## 10. Cross-references
+
+- **Platform meta-repo:** `gitea.mercnet.info/scaffoldrack/platform`
+- **Tools repo (templates, scaffolding, hooks):** `gitea.mercnet.info/scaffoldrack/tools`
+- **Personal kb:** `gitea.mercnet.info/scaffoldrack/kb` (private)
+- **Token storage:** `~/.blackwell` on each control node (per ADR-014 in `kb/projects/scaffoldrack/decisions/`)
+- **Three-scope CLAUDE.md model:** `kb/meta/2026-05-09-claude-md-three-scopes.md`
+- **Tooling vs. declarative state:** `kb/meta/2026-05-10-tooling-vs-declarative-state.md`
+- **Scope 2 hooks decision:** `kb/projects/scaffoldrack/decisions/012-per-repo-githooks-with-corehookspath.md`
+
+## 11. Cross-cutting backlog (not bootstrap-specific)
+
+Items that aren't bootstrap's job but were noted during sessions and don't yet have a home elsewhere. These should migrate to the right place when that place exists. Tracked here as a temporary catch-all.
+
+- **`kb/decisions-index.md` (or similar discoverability layer)** — with ADRs landing in multiple locations across the kb (`kb/projects/scaffoldrack/decisions/`, `kb/projects/scaffoldrack/tracks/<track>/decisions/`, per-repo `decisions/`), there's a real risk of an ADR getting missed because someone looks in the wrong place. A small index — possibly auto-generated by walking `**/decisions/*.md` and pulling titles — would consolidate "where do I find decisions about X" into one lookup. Not urgent but increasingly valuable as the count grows.
+- **Operational runbooks for git history rewriting** — when a commit lands that should have been excluded (secrets, large files, anything that needs to be unfindable in mirror history), the recovery procedure should be a runbook in `scaffoldrack/runbooks` rather than re-derived each time.
+- **`tools/scripts/audit-mirrors.sh`** — formalize the curl+yq audit loop that confirms every Gitea push-mirror is configured and not erroring.
+- **URL validation for `setup-gitea-mirrors.sh` (now superseded by `scaffold-repo.sh`)** — backlog item from the 2026-05-09 incident; the new scaffold-repo path doesn't have the old script's bug, but new mirror-touching scripts should be reviewed for similar fat-finger risk.
+- **Custom git-credential-blackwell helper** — replace HTTPS-with-stored-token with a credential helper that reads from `~/.blackwell` directly. Cleaner than the current pattern.
+- **Custom Gitea SSH on alternate port** — long-term fix for the port-22 conflict that currently has Gitea SSH disabled. (Documented backlog item; not urgent.)
+- **Self-host `thescaffoldrack.com`** — when Traefik/ingress is up. Not bootstrap's job but worth tracking.
+- **Personal dotfiles repo at `blackwell/dotfiles`** — private, not mirrored. For Andrew's personal-preference shell config that doesn't belong in scaffoldrack.
+
+When any of these items land in their proper home (a runbook, a tools script, a kb meta artifact, etc.), remove from this list.

@@ -1,79 +1,236 @@
-# CLAUDE.md — bootstrap
+# CLAUDE.md — bootstrap (Scope 3)
 
-Operational rules for Claude Code working in this repo. Auto-loaded on session start.
+Repo-specific working agreements for the **bootstrap** repo in the scaffoldrack
+organization. Auto-loaded by code-Claude on session start in this repo.
 
-For full repo context and rationale, read `CONTEXT.md`. For detailed operational guidance, read `INSTRUCTIONS.md`. This file is the load-bearing minimum.
+This file is **Scope 3** in the three-scope CLAUDE.md model
+(see `kb/meta/2026-05-09-claude-md-three-scopes.md`). It composes with:
+
+- **Scope 2** (scaffoldrack-org-wide): `~/Projects/scaffoldrack/CLAUDE.md`
+  — runtime model, two-identity model, host inventory, Gitea/GitHub
+  push pattern, scaffoldrack-specific conventions.
+- **Scope 1** (universal): `~/CLAUDE.md` — communication register, document
+  conventions, the 3am rule, deliver-complete-files-or-deterministic-commands,
+  the kb's own conventions.
+
+This file holds **only what's specific to bootstrap**. Don't restate
+Scope 1 or Scope 2 rules here. For the larger context and rationale,
+read `CONTEXT.md`.
 
 ---
 
 ## Read these on every session
 
-1. `CONTEXT.md` — what this repo is, architectural decisions, current state
-2. `INSTRUCTIONS.md` — operational rules for working in this repo
+In addition to walking up the tree for Scope 1 and Scope 2 CLAUDE.md files,
+on every session in this repo:
+
+1. `CLAUDE.md` (this file) — repo-specific rules
+2. `CONTEXT.md` — what this repo is, architectural decisions, current state
 3. Any `decisions/` ADR relevant to your task
+4. `git status` and `git log -5` to see current state and recent activity
 
-## Identity
+If the user references "the script," "that role," "this playbook" — clarify which one before proceeding. Ambiguity in this repo costs time.
 
-This is the **bootstrap** repo in the **scaffoldrack** organization. It holds:
+Verify which host you're working against. `commander` (control node, `ansible_connection: local`) and managed hosts (`ai`, `pve1`, `pve2`) have different operational models.
 
-- One shell script (`scripts/bootstrap-control-node.sh`) — Docker + devops-toolkit container only
-- All Ansible automation for managing the Scaffold Rack platform — inventory, roles, playbooks
+## Repo identity
 
-This repo's job ends at "host is configured, hardened, and ready for whatever comes next." Application deployment, Kubernetes provisioning, and GitOps live elsewhere.
+This is the **bootstrap** repo. It holds:
 
-## Hard rules
+- **One shell script** (`scripts/bootstrap-control-node.sh`) — installs Docker
+  and builds/pulls the `devops-toolkit:latest` container image. Nothing else.
+- **All Ansible automation** for managing the scaffoldrack platform —
+  inventory, roles, playbooks. Includes the `control_node` role that
+  configures the control node itself (zsh, toolkit aliases, completions),
+  and the eventual `dev_environment` role that handles per-developer-machine
+  state (umask, CLAUDE.md symlinks).
 
-- **Idempotency is non-negotiable.** Every script and playbook must be safe to re-run. Re-runs detect existing state and skip with a `warn` log; they never fail or do destructive work.
-- **Always read files before editing.** Never reconstruct file contents from memory or assumption. This is project-wide and applies without exception.
-- **No heredocs in scripts.** Use external configuration files when needed.
-- **Markdown only for documentation.** No `.docx`, `.pdf`, or other formats.
-- **Secrets never committed.** ed25519 *public* keys are fine to commit; private keys never. Tokens come from `~/.blackwell` on the control node, sourced at runtime.
-- **`tmp/` is for ephemeral work.** Never commit work products from `tmp/` directly — move them to their proper location first.
+The shell script is the only thing that exists outside Ansible because there's
+no way to use Ansible to set up the thing that runs Ansible. Once the script
+finishes and the container image is available, Ansible takes over for
+everything else.
 
-## The two-identity model
+This repo is the **originator** of two scaffoldrack-org-wide models documented
+in Scope 2 (don't restate them here):
 
-Every managed host has two identities:
+- **The runtime model** — `bootstrap-control-node.sh` builds the
+  `devops-toolkit:latest` image; `roles/control_node/` deploys the zsh
+  aliases that make it reachable.
+- **The two-identity model** — `playbooks/bootstrap.yml` plus
+  `roles/bootstrap_bob/` is what creates bob on each new managed host.
 
-- **andrew** — manual foothold for one-time bootstrap. Sudo with password.
-- **bob** — automation identity created by `bootstrap.yml`. UID 990, ed25519 key auth, NOPASSWD sudo. Used for everything after bootstrap.
+Other scaffoldrack repos consume these models as inputs; bootstrap creates them.
 
-Be acutely aware which identity is active when writing tasks that affect SSH or sudo. Lockout is a real risk. The `bootstrap.yml` playbook MUST verify bob can sudo before disabling SSH password auth.
+This repo's job ends at "host is configured, hardened, and ready for whatever comes next." Application deployment, Kubernetes provisioning, GitOps, and observability live elsewhere.
 
-## The runtime model
+## Repo-specific hard rules
 
-All `ansible*`, `kubectl`, `helm`, `vault`, etc. commands run inside the `devops-toolkit:latest` container, invoked via zsh aliases set up by `roles/control_node/`. Do not install Ansible, kubectl, or other tools directly on hosts. The container IS the runtime.
+These specialize Scope 1 and Scope 2 rules for this repo's specific concerns.
 
-If something doesn't work in the container, fix the container or the Ansible code. Do not bypass by installing tools on the host.
+### Idempotency is the bright-line requirement here
 
-## Conventions
+Scope 2 already states this; in this repo, every script and playbook gets
+exercised on re-runs constantly during development. Re-runs detect existing
+state and skip with a `warn` log. Never destructive, never failing on
+second-or-later invocation.
 
-- Color-coded shell helpers: `log()` (green INFO), `warn()` (yellow WARN), `die()` (red ERR, exits non-zero)
-- `.example` suffix for templated files; real values gitignored
-- ADRs in `decisions/` with format: Status, Date, Context, Decision, Consequences, Alternatives Considered, Trade-offs Accepted, When This Is the Wrong Choice
-- README.md is human-facing; INSTRUCTIONS.md is for AI; CONTEXT.md is the living source of truth
-- Use `~/bin/kubectl` only for *work* cluster commands — this repo doesn't touch the work cluster
+When writing or modifying any script or playbook, the question to ask is:
+*"If this runs twice in a row, does the second run produce 'WARN: already
+done, skipping' messages and exit cleanly?"* If not, fix it before merging.
 
-## On scope and pushback
+### `bootstrap-control-node.sh` is allowed to do exactly two things
 
-- This repo does platform infrastructure, not application code or personal preferences
-- Personal dotfiles (custom prompt, vim config, non-toolkit aliases) belong in a separate dotfiles repo
-- If a request would expand the script `bootstrap-control-node.sh` beyond Docker + container image, push back and propose an Ansible role instead
-- Don't add features beyond what was asked
-- Don't introduce new tools without discussion
+Install Docker and build/pull the `devops-toolkit:latest` image. Anything
+else (zsh setup, alias deployment, completion generation, oh-my-zsh
+installation, toolkit configuration, etc.) belongs in `roles/control_node/`,
+not in this script.
 
-## On uncertainty
+If a request would expand the script beyond Docker + container image, push
+back and propose an Ansible role instead. The script is deliberately narrow
+because everything beyond it can be Ansible-driven.
 
-- Convention questions → re-read CONTEXT.md
-- Decision rationale → check `decisions/`
-- Scope ambiguity → ask, don't guess
-- Multiple valid implementations → present options briefly, ask which to pursue
+### `bootstrap.yml` MUST verify bob can sudo before disabling SSH password auth
 
-The user values explicit-over-clever and the 3am rule. Lead with the simpler version. Complexity must justify itself.
+This is the lockout-prevention discipline. The verification step is
+non-optional. Any change to `bootstrap.yml` that weakens this verification
+should be flagged loudly and require explicit confirmation.
 
-## On end-of-session
+When writing or modifying tasks that affect SSH or sudo configuration, be
+acutely aware which identity is making the change and which identity will
+be used for subsequent operations. Lockout is a real risk.
 
-- Confirm git state is clean or intentionally staged
-- Propose CONTEXT.md updates for significant work (especially §12 Current state)
-- Draft ADR for any decision that emerged
-- Push to gitea (`git push gitea main`); verify mirror to GitHub fired
-- Surface gotchas, workarounds, or non-obvious dependencies for future sessions
+### `ansible_connection: local` for commander
+
+commander is both control node *and* a managed host. To avoid the
+2FA-on-external-SSH consideration, it manages itself locally. Don't change
+this without considering the consequences for the 2FA posture.
+
+### bob's private key handling
+
+bob's private key lives at `~/.ssh/bob_ed25519` on the control node. Never
+commit, never reference by content. bob's public key is `files/bob.pub`,
+which IS committed.
+
+If a task or script requires a secret or credential pattern that isn't
+already covered above or in the Scope 2 token convention (`~/.blackwell`),
+stop and ask. Don't invent a new secret-handling pattern.
+
+## Ansible role conventions
+
+Roles live in `roles/<name>/` with the standard Ansible layout:
+`tasks/`, `handlers/`, `templates/`, `files/`, `defaults/`, `vars/`, `meta/`,
+`README.md`.
+
+When creating a new role:
+
+- Start with `tasks/main.yml` that includes other task files via
+  `import_tasks` or `include_tasks`
+- Use tags on each task file so `--tags <tag>` allows targeted re-runs
+- Document in the role's `README.md`: purpose, variables, dependencies, tags
+- Test with `--check --diff` against a known-good host before applying for real
+
+When modifying an existing role:
+
+- Read the existing `tasks/main.yml` and any included task files first
+- Read the role's `README.md` for context
+- Preserve existing tags and structure unless explicitly changing them
+
+### Hardening is one role with task-file splits and tags
+
+One `roles/hardening/` role that contains the full host hardening surface
+(SSH, UFW, sysctl, fail2ban, etc.) split across multiple task files,
+tagged so individual concerns can be re-applied via `--tags <tag>` without
+re-running the whole role. This avoids both "one giant unmaintainable
+playbook" and "ten micro-roles that have to be wired together."
+
+## Playbook conventions
+
+Playbooks compose roles. Keep them thin — most logic belongs in roles,
+not playbooks.
+
+- `playbooks/site.yml` — daily driver. Idempotent. Runs everything appropriate
+  for each host group.
+- `playbooks/bootstrap.yml` — one-time-per-host onboarding. Runs as `andrew`
+  with `--ask-become-pass`. Creates `bob`, deploys hardening, validates,
+  disables password auth.
+- `playbooks/control-node.yml` — configures the control node itself. Run
+  manually inside the container the first time; via the toolkit alias
+  afterwards.
+- `playbooks/ping.yml` — smoke test. Always runnable.
+
+When adding a playbook, ask: *"Does this need to exist as its own playbook,
+or is it a tag invocation of an existing playbook?"* Most narrow needs are
+tag invocations.
+
+## Validation order
+
+When a change to a role, playbook, or script needs validation, run it against
+hosts in this order. Each step has a recoverable target before the next
+step's stakes go up.
+
+1. **commander** — for control-node-specific things
+   (`bootstrap-control-node.sh`, `control-node.yml`, anything that touches
+   the toolkit aliases). commander is the easiest to recover.
+2. **ai** — managed-host validation. A real host but not a hypervisor, so
+   mistakes are recoverable.
+3. **pve2** — first hypervisor. Validates Proxmox-bound work without
+   touching pve1.
+4. **pve1** — second hypervisor. Same configuration applied via `site.yml`.
+   pve1 follows once pve2 is proven.
+
+Don't skip steps. Don't apply changes to pve1 without proving them on pve2 first.
+
+See `decisions/004-validation-order.md` for the rationale.
+
+## Toolkit container debugging
+
+When debugging an Ansible run that's misbehaving:
+
+- Check whether the alias is invoking the container correctly:
+  `type ansible-playbook` should show the alias definition (not a binary path).
+- Check whether the container can reach the target host:
+  `docker run ... ssh bob@<host>` from inside the container.
+- Check whether the container has the expected tools:
+  `docker run --rm devops-toolkit:latest which ansible kubectl helm`.
+
+The toolkit aliases file at `roles/control_node/files/scaffoldrack-toolkit.zsh`
+is committed. If aliases need to change, change the committed file and
+re-run the `control_node` role; don't edit the deployed file directly on
+commander.
+
+## Things NOT to do in this repo
+
+- **Don't bypass the toolkit container** by running `apt install ansible` on
+  the host. The container IS the runtime. If something doesn't work in the
+  container, fix the container or the Ansible code, not by sidestepping it.
+- **Don't disable error checking.** `set -euo pipefail` in shell scripts.
+  `ignore_errors: yes` in Ansible only with explicit justification in a comment.
+- **Don't add features beyond what was asked.** This repo's scope is
+  "Ansible automation for managing the platform." Application-level concerns
+  belong elsewhere.
+- **Don't introduce new tools without discussion.** If a task seems to
+  require a new Ansible collection, a new linter, a new dependency,
+  pause and ask.
+- **Don't commit secrets, ever.** Even values that "look fake." If a task
+  wants a secret it doesn't already have access to, that's a design question.
+  Stop and ask.
+
+## On end-of-session in this repo
+
+In addition to the Scope 1 universal end-of-session checklist:
+
+- Confirm git state is clean or intentionally staged. Don't leave uncommitted
+  changes undocumented.
+- If significant work happened, propose CONTEXT.md updates to reflect current
+  state of the repo. Section "Current state" is the most likely target.
+- If a decision was made (e.g., "we're going to use X for Y"), draft an ADR
+  in `decisions/` following the existing numbering. Don't bury decisions in
+  commit messages.
+- If something was discovered that future-Code-Claude or future-Andrew will
+  need (a gotcha, a workaround, a non-obvious dependency), capture it.
+  Either as a comment in the relevant file, an ADR, or a note Andrew can
+  add to backlog.
+- Push to gitea (`git push gitea main`); the GitHub mirror fires automatically.
+- File a session summary in the kb at
+  `~/Projects/scaffoldrack/kb/sessions/<YYYY-MM-DD>-<topic-slug>.md`,
+  per the kb's `session-summarize` skill.

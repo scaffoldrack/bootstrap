@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+#
+# .githooks/pre-commit — normalize permissions on staged files
+#
+# Installed by tools/scripts/install-hooks.sh (or scaffold-repo.sh during
+# initial repo creation). Runs before every commit on this repo. Adjusts
+# the permissions of any staged files to the scaffoldrack baseline:
+#
+#   directories                  750  (rwxr-x---)
+#   regular files                640  (rw-r-----)
+#   executable scripts (.sh/.py) 750  (rwxr-x---)
+#
+# After chmod, the staged files are re-added to pick up the new mode bits
+# (git tracks the executable bit, so re-adding propagates the change into
+# the commit).
+#
+# This hook is non-blocking — it normalizes and proceeds. If it fails for
+# some reason, it logs and lets the commit continue rather than blocking
+# legitimate work.
+#
+# Symlinks are skipped (chmod through a symlink would change the target's
+# permissions, which is rarely what's wanted).
+#
+# To bypass this hook for a single commit (e.g., debugging the hook itself):
+#   git commit --no-verify
+#
+# To extend this hook with additional checks, add them below the perm
+# normalization block. Keep them non-blocking unless there's a strong reason
+# to block — the hook's job is normalization, not gatekeeping.
+
+set -uo pipefail
+# Note: deliberately not using `set -e`. The hook should be tolerant of
+# unexpected failures rather than blocking commits.
+
+# ─────────────────────────────────────────────────────────
+# Get the list of staged files
+# ─────────────────────────────────────────────────────────
+
+# Only look at staged files (not unstaged changes)
+# --diff-filter=ACMR: Added, Copied, Modified, Renamed (skip Deleted)
+# -z: NUL-separated output (handles filenames with spaces/newlines)
+
+mapfile -d '' -t STAGED_FILES < <(
+    git diff --cached --name-only --diff-filter=ACMR -z 2>/dev/null
+)
+
+if [ ${#STAGED_FILES[@]} -eq 0 ]; then
+    # Nothing staged; nothing to do.
+    exit 0
+fi
+
+# ─────────────────────────────────────────────────────────
+# Normalize permissions
+# ─────────────────────────────────────────────────────────
+
+normalized=0
+skipped=0
+
+for file in "${STAGED_FILES[@]}"; do
+    # Skip if the file doesn't exist on disk (e.g., it was staged then
+    # deleted — though --diff-filter should have excluded that already)
+    if [ ! -e "$file" ]; then
+        continue
+    fi
+
+    # Skip symlinks
+    if [ -L "$file" ]; then
+        skipped=$((skipped + 1))
+        continue
+    fi
+
+    # Determine target mode by file type and extension
+    case "$file" in
+        *.sh|*.py)
+            target_mode=750
+            ;;
+        *)
+            target_mode=640
+            ;;
+    esac
+
+    # Check current mode; only chmod if it's not already correct
+    current_mode="$(stat -c '%a' "$file" 2>/dev/null || echo "")"
+    if [ "$current_mode" != "$target_mode" ]; then
+        chmod "$target_mode" "$file" 2>/dev/null || true
+        # Re-add so the new mode is reflected in the commit
+        git add "$file" 2>/dev/null || true
+        normalized=$((normalized + 1))
+    fi
+done
+
+# Also normalize directory permissions for any staged path's parent dirs.
+# This is light-touch — only the dirs containing staged files.
+mapfile -d '' -t STAGED_DIRS < <(
+    printf '%s\0' "${STAGED_FILES[@]}" | xargs -0 -n1 dirname | sort -uz 2>/dev/null
+)
+
+dirs_normalized=0
+for dir in "${STAGED_DIRS[@]}"; do
+    if [ ! -d "$dir" ] || [ -L "$dir" ]; then
+        continue
+    fi
+    # Skip the repo root and .git/
+    if [ "$dir" = "." ] || [[ "$dir" == .git* ]]; then
+        continue
+    fi
+    current_mode="$(stat -c '%a' "$dir" 2>/dev/null || echo "")"
+    if [ "$current_mode" != "750" ]; then
+        chmod 750 "$dir" 2>/dev/null || true
+        dirs_normalized=$((dirs_normalized + 1))
+    fi
+done
+
+# ─────────────────────────────────────────────────────────
+# Report (only if anything was changed)
+# ─────────────────────────────────────────────────────────
+
+if [ $normalized -gt 0 ] || [ $dirs_normalized -gt 0 ]; then
+    echo "[pre-commit] normalized permissions: $normalized files, $dirs_normalized dirs"
+fi
+
+# Always succeed — don't block commits even if something unexpected happened.
+exit 0

@@ -1,29 +1,5 @@
-# scaffoldrack/bootstrap — .gitignore
-#
-# Scripts and runbooks for bringing up the platform from scratch.
-
-# ─────────────────────────────────────────────────────────
-# Shell scripts — temp output is common
-# ─────────────────────────────────────────────────────────
-
-# Output from scripts run locally
-output/
-*.output
-*.result
-
-# ─────────────────────────────────────────────────────────
-# Python (if any scripts are in Python)
-# ─────────────────────────────────────────────────────────
-
-__pycache__/
-*.py[cod]
-*$py.class
-.Python
-venv/
-.venv/
-env/
-ENV/
-*.egg-info/
+# Universal base .gitignore for scaffoldrack repos.
+# Append type-specific sections below this when scaffolding.
 
 # ─────────────────────────────────────────────────────────
 # Workspace
@@ -37,7 +13,7 @@ tmp/*
 *.tgz
 
 # ─────────────────────────────────────────────────────────
-# Secrets and environment
+# Secrets
 # ─────────────────────────────────────────────────────────
 .env
 .env.*
@@ -52,11 +28,10 @@ id_ed25519
 credentials
 credentials.json
 
-# Bootstrap often generates initial credentials that shouldn't be committed
-initial-root-token
-vault-init.json
-unseal-keys.txt
-bootstrap-token
+# API keys and tokens
+*apikey*
+*api_key*
+*.token
 
 # ─────────────────────────────────────────────────────────
 # OS junk
@@ -98,3 +73,42 @@ Session.vim
 # Logs
 logs/
 *.log
+
+# ─────────────────────────────────────────────────────────
+# Ansible
+# ─────────────────────────────────────────────────────────
+
+# Retry files from failed plays
+*.retry
+
+# Vault password files (NEVER commit these)
+.vault_pass
+.vault_pass.txt
+vault_password
+vault_password.txt
+*vault_pass*
+
+# Per-host overrides that should stay local
+host_vars/*.local
+group_vars/*.local
+
+# Ansible Galaxy installed roles (committed via requirements.yml instead)
+roles/external/
+collections/ansible_collections/
+
+# Local fact cache
+.facts_cache/
+fact_cache/
+
+# Compiled binaries from custom modules
+*.pyc
+
+# Molecule test artifacts (if used)
+.molecule/
+
+# ─────────────────────────────────────────────────────────
+# bootstrap repo specific
+# ─────────────────────────────────────────────────────────
+
+# Old session-handoff documents that may have landed here in error
+conversation-summary*.md
