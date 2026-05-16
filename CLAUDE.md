@@ -180,7 +180,7 @@ step's stakes go up.
 
 Don't skip steps. Don't apply changes to pve1 without proving them on pve2 first.
 
-See `decisions/004-validation-order.md` for the rationale.
+See `decisions/0004-validation-order.md` for the rationale.
 
 ## Toolkit container debugging
 

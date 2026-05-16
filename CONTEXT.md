@@ -2,7 +2,7 @@
 
 **Repo purpose:** Ansible automation that takes raw scaffoldrack hosts (commander, ai, pve1, pve2) from "fresh OS install with andrew having sudo" to "fully bootstrapped, hardened, and ready for the platform layers above." Plus the one shell script that bootstraps the control node itself.
 
-**Last updated:** 2026-05-10 (post-session: code-Claude first-run verification)
+**Last updated:** 2026-05-16 (post-session: MADR adoption + ADR retrofit, ADR-0005 drafted)
 
 ---
 
@@ -55,11 +55,14 @@ bootstrap/
 ├── .gitignore
 ├── .githooks/             # per-repo git hooks (set core.hooksPath = .githooks)
 │   └── pre-commit         # normalizes permissions on staged files
-├── decisions/             # Scope 3 ADRs for repo-specific decisions
-│   ├── 001-automation-user-bob.md
-│   ├── 002-toolkit-container-as-runtime.md
-│   ├── 003-bootstrap-control-node-scope.md
-│   └── 004-validation-order.md
+├── decisions/             # Scope 3 ADRs (MADR 4.0.0 format)
+│   ├── 0001-automation-user-bob.md
+│   ├── 0002-toolkit-container-as-runtime.md
+│   ├── 0003-bootstrap-control-node-scope.md
+│   ├── 0004-validation-order.md
+│   └── 0005-no-docker-group-modification.md
+├── files/                 # committed support files (bob.pub, etc.)
+│   └── bob.pub
 ├── inventory/             # Ansible inventory (placeholder)
 │   └── .gitkeep
 ├── roles/                 # Ansible roles (placeholder)
@@ -91,7 +94,7 @@ The host inventory is also restated at the org level in Scope 2 CLAUDE.md (`kb/p
 
 ## 5. The two identities
 
-Per ADR-001 (`decisions/001-automation-user-bob.md`) and Scope 2 CLAUDE.md §2:
+Per ADR-0001 (`decisions/0001-automation-user-bob.md`) and Scope 2 CLAUDE.md §2:
 
 - **andrew** — human-provisioned foothold. Created during OS install with sudo (password required, NOT NOPASSWD). Used exactly once per host: to run `bootstrap.yml` and create bob. Andrew passwords differ per host (security hygiene); this only matters at bootstrap time.
 - **bob** — automation identity. Created by `bootstrap.yml` running as andrew. UID 990, ed25519 key authentication, NOPASSWD: ALL sudo. Every Ansible playbook from `site.yml` onward runs as bob. Andrew is dormant after bootstrap.
@@ -100,7 +103,7 @@ The model means there's one irreducibly manual prerequisite per host: andrew mus
 
 ## 6. The runtime
 
-Per ADR-002 (`decisions/002-toolkit-container-as-runtime.md`) and Scope 2 CLAUDE.md §1:
+Per ADR-0002 (`decisions/0002-toolkit-container-as-runtime.md`) and Scope 2 CLAUDE.md §1:
 
 All `ansible*`, `kubectl`, `helm`, `vault`, etc. commands run inside the
 `devops-toolkit:latest` container, invoked via zsh aliases set up by
@@ -195,25 +198,24 @@ Specifically, what exists today:
 - `CLAUDE.md` (Scope 3, composes with Scopes 1 and 2)
 - `README.md`
 - Empty placeholder directories: `inventory/`, `roles/`, `playbooks/`, `scripts/`
-- Four ADRs in `decisions/` capturing the foundational decisions
+- Five ADRs in `decisions/` (MADR 4.0.0 format) capturing the foundational decisions
 - `.githooks/pre-commit` from the canonical source in tools repo
+- `files/bob.pub` — bob's ed25519 public key
 
 What's NOT here yet:
 
 - `scripts/bootstrap-control-node.sh` — to be written next session
 - `inventory/hosts.yml` — to be written when bootstrap.yml is being written
 - `roles/control_node/` — to be written after `bootstrap-control-node.sh` is validated
-- `roles/bootstrap_bob/` — to be written when bob's keypair is generated and bootstrap.yml is being written
+- `roles/bootstrap_bob/` — to be written when bootstrap.yml is being written
 - `roles/baseline/`, `roles/hardening/`, `roles/proxmox/` — later phases
 - `playbooks/control-node.yml`, `playbooks/bootstrap.yml`, `playbooks/site.yml`, `playbooks/ping.yml` — to be written as the corresponding roles materialize
-- `files/bob.pub` — to be created when bob's keypair is generated
 
 ## 9. Backlog (bootstrap-specific items)
 
 Items captured here so they don't get lost. Most belong in future ADRs or work cycles.
 
-- Generate bob's ed25519 keypair on commander (immediate; `ssh-keygen -t ed25519 -f ~/.ssh/bob_ed25519 -C "bob@scaffoldrack" -N ""`)
-- Verify docker-devops state on commander (cloned? built? at what path?)
+- Verify docker-devops state on commander (cloned? built? at what path?). Note: docker-devops now consumes files in a `files/` directory including internal CA certificates flowed from Caddy's internal CA (copied to the NAS so the same CA is used both places); eventual migration to Vault. Affects the build path of `bootstrap-control-node.sh`.
 - Write `bootstrap-control-node.sh` and validate on commander
 - Build `roles/control_node/` (zsh, oh-my-zsh, toolkit aliases adapted from PoC version)
 - Write `playbooks/control-node.yml`
@@ -237,6 +239,7 @@ Items captured here so they don't get lost. Most belong in future ADRs or work c
 - **Scope 2 hooks decision:** `kb/projects/scaffoldrack/decisions/012-per-repo-githooks-with-corehookspath.md`
 - **Code-Claude first-run session:** `kb/sessions/2026-05-10-code-claude-first-run.md`
 - **Chat-Claude / code-Claude handoff lessons:** `kb/meta/2026-05-10-chat-claude-code-claude-handoff-lessons.md`
+- **MADR adoption and conventions:** `kb/meta/2026-05-16-madr-adoption-conventions.md`
 
 ## 11. Cross-cutting backlog (not bootstrap-specific)
 
