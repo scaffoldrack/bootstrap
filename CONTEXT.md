@@ -2,7 +2,7 @@
 
 **Repo purpose:** Ansible automation that takes raw scaffoldrack hosts (commander, ai, pve1, pve2) from "fresh OS install with andrew having sudo" to "fully bootstrapped, hardened, and ready for the platform layers above." Plus the one shell script that bootstraps the control node itself.
 
-**Last updated:** 2026-05-16 (post-session: MADR adoption + ADR retrofit, ADR-0005 drafted)
+**Last updated:** 2026-05-16 (post-session: bootstrap-control-node.sh authored and validated on valkyrie)
 
 ---
 
@@ -137,7 +137,7 @@ Bootstrap progresses through these phases. Each phase validates against the prev
 - Run `playbooks/control-node.yml` once via raw `docker run` (the bootstrap-the-bootstrap step). Result: zsh, oh-my-zsh, toolkit aliases configured on commander.
 - Validate: `type ansible-playbook` on commander shows the toolkit alias. `ansible localhost -m ping` works through the alias.
 
-**Status:** Not started. Drafting `bootstrap-control-node.sh` is the next concrete unit of work.
+**Status:** Script written and merged to main. Idempotency path verified on valkyrie test machine (Docker already installed; clone, build, smoke all exercised, then re-run exercises all three short-circuit warns). The clean-host install path (Docker-not-installed) remains unverified — deferred to a clean VM or spare Pi session. The bootstrap-the-bootstrap manual run (`playbooks/control-node.yml`) is the next concrete unit of work.
 
 ### Phase 2 — Bootstrap one managed host (ai)
 
@@ -186,7 +186,7 @@ Bootstrap progresses through these phases. Each phase validates against the prev
 
 ## 8. Current state
 
-**Phase 0 done.** Phase 1 is the immediate next work; the next unit of code is `scripts/bootstrap-control-node.sh`.
+**Phase 1 is in flight.** `scripts/bootstrap-control-node.sh` is written, merged to main, and validated on the valkyrie test machine for the idempotency path. The next concrete unit is `playbooks/control-node.yml` plus the `roles/control_node/` it consumes.
 
 **Code-Claude on commander is verified-operational** as of 2026-05-10. The first-run verification (Milestones 1–4 of the crawl-phase plan) confirmed: three-scope CLAUDE.md walk-up resolves correctly, file reads are accurate (no confabulation), safe write/read/delete in `tmp/` works cleanly, and the `.githooks/pre-commit` is the perm-normalizing hook.
 
@@ -197,16 +197,16 @@ Specifically, what exists today:
 - This `CONTEXT.md`
 - `CLAUDE.md` (Scope 3, composes with Scopes 1 and 2)
 - `README.md`
-- Empty placeholder directories: `inventory/`, `roles/`, `playbooks/`, `scripts/`
+- `scripts/bootstrap-control-node.sh` — stage 1 of the control-node bootstrap (validated on valkyrie 2026-05-16)
+- Empty placeholder directories: `inventory/`, `roles/`, `playbooks/`
 - Five ADRs in `decisions/` (MADR 4.0.0 format) capturing the foundational decisions
 - `.githooks/pre-commit` from the canonical source in tools repo
 - `files/bob.pub` — bob's ed25519 public key
 
 What's NOT here yet:
 
-- `scripts/bootstrap-control-node.sh` — to be written next session
 - `inventory/hosts.yml` — to be written when bootstrap.yml is being written
-- `roles/control_node/` — to be written after `bootstrap-control-node.sh` is validated
+- `roles/control_node/` — unblocked; next concrete unit of work alongside `playbooks/control-node.yml`
 - `roles/bootstrap_bob/` — to be written when bootstrap.yml is being written
 - `roles/baseline/`, `roles/hardening/`, `roles/proxmox/` — later phases
 - `playbooks/control-node.yml`, `playbooks/bootstrap.yml`, `playbooks/site.yml`, `playbooks/ping.yml` — to be written as the corresponding roles materialize
@@ -215,8 +215,8 @@ What's NOT here yet:
 
 Items captured here so they don't get lost. Most belong in future ADRs or work cycles.
 
-- Verify docker-devops state on commander (cloned? built? at what path?). Note: docker-devops now consumes files in a `files/` directory including internal CA certificates flowed from Caddy's internal CA (copied to the NAS so the same CA is used both places); eventual migration to Vault. Affects the build path of `bootstrap-control-node.sh`.
-- Write `bootstrap-control-node.sh` and validate on commander
+- Verify docker-devops state on commander (cloned? built? at what path?). Observed on valkyrie 2026-05-16: docker-devops repo includes a `files/custom-ca/` directory committed in the repo itself; the build pulls it directly from the clone, so `bootstrap-control-node.sh` does no CA staging and does not need to. The CA material flows from Caddy's internal CA (copied to the NAS so the same CA is used both places); eventual migration to Vault.
+- Validate `bootstrap-control-node.sh` on a clean host — fresh VM or spare Pi — to exercise the Docker-install-from-scratch path that valkyrie skipped (Docker was already present on valkyrie, so only the short-circuit warn was exercised on that path)
 - Build `roles/control_node/` (zsh, oh-my-zsh, toolkit aliases adapted from PoC version)
 - Write `playbooks/control-node.yml`
 - Build inventory and `playbooks/ping.yml` for the smoke test
@@ -249,6 +249,7 @@ Items that aren't bootstrap's job but were noted during sessions and don't yet h
 - **`kb/decisions-index.md` (or similar discoverability layer)** — with ADRs landing in multiple locations across the kb (`kb/projects/scaffoldrack/decisions/`, `kb/projects/scaffoldrack/tracks/<track>/decisions/`, per-repo `decisions/`), there's a real risk of an ADR getting missed because someone looks in the wrong place. A small index — possibly auto-generated by walking `**/decisions/*.md` and pulling titles — would consolidate "where do I find decisions about X" into one lookup. Not urgent but increasingly valuable as the count grows.
 - **Operational runbooks for git history rewriting** — when a commit lands that should have been excluded (secrets, large files, anything that needs to be unfindable in mirror history), the recovery procedure should be a runbook in `scaffoldrack/runbooks` rather than re-derived each time.
 - **`tools/scripts/audit-mirrors.sh`** — formalize the curl+yq audit loop that confirms every Gitea push-mirror is configured and not erroring.
+- **Gitea push-mirror does not appear to propagate branch deletions to GitHub.** Observed 2026-05-16: deleting `bootstrap-control-node-draft` from Gitea (`git push gitea --delete …`) successfully removed the branch from Gitea, but the GitHub mirror retained the stale ref pointing at the same SHA as `main` (harmless content-wise, cosmetic stale ref). Worth understanding whether this is Gitea push-mirror config (mirror-on-add only, not mirror-on-delete) or expected behavior. Affects the cleanliness of the public GitHub view of every scaffoldrack repo.
 - **URL validation for `setup-gitea-mirrors.sh` (now superseded by `scaffold-repo.sh`)** — backlog item from the 2026-05-09 incident; the new scaffold-repo path doesn't have the old script's bug, but new mirror-touching scripts should be reviewed for similar fat-finger risk.
 - **Custom git-credential-blackwell helper** — replace HTTPS-with-stored-token with a credential helper that reads from `~/.blackwell` directly. Cleaner than the current pattern.
 - **Custom Gitea SSH on alternate port** — long-term fix for the port-22 conflict that currently has Gitea SSH disabled. (Documented backlog item; not urgent.)
