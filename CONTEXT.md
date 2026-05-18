@@ -2,7 +2,7 @@
 
 **Repo purpose:** Ansible automation that takes raw scaffoldrack hosts (commander, ai, pve1, pve2) from "fresh OS install with andrew having sudo" to "fully bootstrapped, hardened, and ready for the platform layers above." Plus the one shell script that bootstraps the control node itself.
 
-**Last updated:** 2026-05-16 (post-session: bootstrap-control-node.sh authored and validated on valkyrie)
+**Last updated:** 2026-05-17 (post-session: ADRs 0006 nftables and 0007 DebOps-as-reference added; role-naming convention added to CLAUDE.md)
 
 ---
 
@@ -15,7 +15,7 @@ This repo is the **foundation layer** of The Scaffold Rack platform. It owns:
 - **The two-identity model implementation** — `andrew` (manual foothold) → `bob` (automation identity) per the playbook in `playbooks/bootstrap.yml`.
 - **The control-node configuration** — `roles/control_node/` deploys zsh, oh-my-zsh, and the toolkit aliases that wrap the devops-toolkit container.
 - **The dev-environment configuration** (anticipated; per the tooling-vs-declarative-state distinction) — `roles/dev_environment/` will eventually handle umask, CLAUDE.md symlinks, and other declarative per-developer-machine state.
-- **Host hardening** — `roles/hardening/` (one role, task-file splits, tags). SSH, UFW, sysctl, fail2ban, etc.
+- **Host hardening** — `roles/hardening/` (one role, task-file splits, tags). SSH, firewall, sysctl, fail2ban, etc.
 - **Eventually, Proxmox conversion** — `roles/proxmox/` for Debian-to-Proxmox conversion on pve1 and pve2.
 
 This repo's job ends at "host is configured, hardened, and ready." Application deployment, Kubernetes provisioning, GitOps, and observability live in other scaffoldrack repos.
@@ -26,10 +26,10 @@ These match the broader Scaffold Rack project conventions. **Most working
 agreements live higher up in the three-scope CLAUDE.md model:**
 
 - **Scope 1 (universal):** `~/CLAUDE.md` — symlinked from
-  `kb/CLAUDE.md`. Communication register, file/document conventions,
+  `kb/CLAUDE-scope1.md`. Communication register, file/document conventions,
   the 3am rule, deliver-complete-files-or-deterministic-commands.
 - **Scope 2 (scaffoldrack-org-wide):** `~/Projects/scaffoldrack/CLAUDE.md`
-  — symlinked from `kb/projects/scaffoldrack/CLAUDE.md`. Runtime model
+  — symlinked from `kb/projects/scaffoldrack/CLAUDE-scope2.md`. Runtime model
   (devops-toolkit container), two-identity model (andrew → bob), host
   inventory, Gitea/GitHub push pattern, `~/.blackwell` token convention,
   per-repo `.githooks/` with `core.hooksPath`.
@@ -60,7 +60,9 @@ bootstrap/
 │   ├── 0002-toolkit-container-as-runtime.md
 │   ├── 0003-bootstrap-control-node-scope.md
 │   ├── 0004-validation-order.md
-│   └── 0005-no-docker-group-modification.md
+│   ├── 0005-no-docker-group-modification.md
+│   ├── 0006-nftables-for-host-firewall.md
+│   └── 0007-debops-as-reference-only.md
 ├── files/                 # committed support files (bob.pub, etc.)
 │   └── bob.pub
 ├── inventory/             # Ansible inventory (placeholder)
@@ -90,7 +92,7 @@ The four scaffoldrack hosts this repo manages:
 
 commander is both control node and managed host (`ansible_connection: local`). The detailed inventory will land in `inventory/hosts.yml` when the inventory work begins.
 
-The host inventory is also restated at the org level in Scope 2 CLAUDE.md (`kb/projects/scaffoldrack/CLAUDE.md` §3). Where they overlap, this file is the operational truth for bootstrap-specific work; Scope 2 is the umbrella view.
+The host inventory is also restated at the org level in Scope 2 CLAUDE.md (`kb/projects/scaffoldrack/CLAUDE-scope2.md` §3). Where they overlap, this file is the operational truth for bootstrap-specific work; Scope 2 is the umbrella view.
 
 ## 5. The two identities
 
@@ -164,7 +166,7 @@ Bootstrap progresses through these phases. Each phase validates against the prev
 ### Phase 5 — Hardening
 
 - `roles/hardening/` applied via `site.yml` to all four hosts.
-- Tags: ssh, ufw, sysctl, fail2ban (initial set; expandable).
+- Tags: ssh, nftables, sysctl, fail2ban (initial set; expandable). See ADR-0006.
 - Validation order matches the bootstrap order.
 
 **Status:** Not started.
@@ -199,7 +201,7 @@ Specifically, what exists today:
 - `README.md`
 - `scripts/bootstrap-control-node.sh` — stage 1 of the control-node bootstrap (validated on valkyrie 2026-05-16)
 - Empty placeholder directories: `inventory/`, `roles/`, `playbooks/`
-- Five ADRs in `decisions/` (MADR 4.0.0 format) capturing the foundational decisions
+- Seven ADRs in `decisions/` (MADR 4.0.0 format) capturing the foundational decisions
 - `.githooks/pre-commit` from the canonical source in tools repo
 - `files/bob.pub` — bob's ed25519 public key
 
@@ -240,6 +242,8 @@ Items captured here so they don't get lost. Most belong in future ADRs or work c
 - **Code-Claude first-run session:** `kb/sessions/2026-05-10-code-claude-first-run.md`
 - **Chat-Claude / code-Claude handoff lessons:** `kb/meta/2026-05-10-chat-claude-code-claude-handoff-lessons.md`
 - **MADR adoption and conventions:** `kb/meta/2026-05-16-madr-adoption-conventions.md`
+- **Host firewall choice (nftables):** `decisions/0006-nftables-for-host-firewall.md`
+- **DebOps as reference, not dependency:** `decisions/0007-debops-as-reference-only.md`
 
 ## 11. Cross-cutting backlog (not bootstrap-specific)
 
