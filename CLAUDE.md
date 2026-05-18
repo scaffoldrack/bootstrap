@@ -117,9 +117,30 @@ stop and ask. Don't invent a new secret-handling pattern.
 
 ## Ansible role conventions
 
+### Role names describe the state the host acquires
+
+Each role is named for what the host gains by running it:
+
+- `control_node` — host becomes a control node (zsh, toolkit aliases, completions)
+- `bootstrap_bob` — host gains bob (the automation identity)
+- `baseline` — host gains baseline configuration (packages, time, hostname)
+- `hardening` — host gains hardening (ssh, firewall, sysctl, fail2ban)
+- `dev_environment` — host gains a developer environment (umask, CLAUDE.md symlinks, hooks config)
+- `proxmox` — host gains Proxmox (Debian-to-PVE conversion)
+
+The test for a new role name: *"Can I read 'the host gains <role name>' naturally?"* If yes, the name fits the pattern.
+
+Names that don't fit:
+
+- **Verbs describing actions** (`setup_control_node`, `configure_hardening`, `install_proxmox`) — the action is implicit in running a role; the name should describe the outcome.
+- **Lifecycle numbering** (`00-baseline`, `10-hardening`) — ordering belongs in `site.yml`, not filenames. Numbering schemes run out of slots and turn into `15a-` workarounds.
+- **Mixed concerns** (`network_and_dns`, `monitoring_stack`) — if a role's name uses "and," it's probably two roles.
+
 Roles live in `roles/<name>/` with the standard Ansible layout:
 `tasks/`, `handlers/`, `templates/`, `files/`, `defaults/`, `vars/`, `meta/`,
 `README.md`.
+
+### Working with roles
 
 When creating a new role:
 
@@ -138,7 +159,7 @@ When modifying an existing role:
 ### Hardening is one role with task-file splits and tags
 
 One `roles/hardening/` role that contains the full host hardening surface
-(SSH, UFW, sysctl, fail2ban, etc.) split across multiple task files,
+(SSH, firewall, sysctl, fail2ban, etc.) split across multiple task files,
 tagged so individual concerns can be re-applied via `--tags <tag>` without
 re-running the whole role. This avoids both "one giant unmaintainable
 playbook" and "ten micro-roles that have to be wired together."
